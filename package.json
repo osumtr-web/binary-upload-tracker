@@ -1,0 +1,10 @@
+{
+  "name": "binary-upload-tracker",
+  "version": "1.0.0",
+  "description": "Detect suspicious binary uploads and process ancestry on macOS/Linux",
+  "scripts": {
+    "start": "bun run server.ts",
+    "test": "bun test"
+  },
+  "license": "MIT"
+}

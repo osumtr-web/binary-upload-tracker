@@ -289,9 +289,9 @@
       <div class="log-controls">
         <select class="risk-filter" id="riskFilter">
           <option value="all">All Classifications</option>
-          <option value="known_safe">🟢 Known Safe</option>
-          <option value="unknown">🟡 Unknown</option>
-          <option value="suspicious">🔴 Suspicious</option>
+          <option value="known_safe">Known Safe</option>
+          <option value="unknown">Unknown</option>
+          <option value="suspicious">Suspicious</option>
         </select>
         <input type="text" class="filter-input" id="filterInput" placeholder="Filter events…">
       </div>
@@ -538,7 +538,7 @@
       if (e.matchedPattern) parts.push(e.matchedPattern);
       if (e.filePath) {
         var basename = e.filePath.split('/').pop() || e.filePath;
-        parts.push('📄 <span class="file-detail-name">' + esc(basename) + '</span>');
+        parts.push('<span class="file-detail-name">' + esc(basename) + '</span>');
         parts.push('<span class="file-detail-path">' + esc(e.filePath) + '</span>');
       }
       return parts.join(' · ') || '';

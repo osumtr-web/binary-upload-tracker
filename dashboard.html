@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Upload Tracker — Outbound Monitor</title>
+<style>
+  :root {
+    --bg-app: #111217;
+    --bg-panel: #181b1f;
+    --bg-nav: #1e2228;
+    --bg-hover: #22252b;
+    --border: #2c323c;
+    --text-primary: #d9d9d9;
+    --text-muted: #8e8e8e;
+    --accent-blue: #3274d9;
+    --risk-low: #73bf69;
+    --risk-med: #f2cc0c;
+    --risk-high: #ff9830;
+    --risk-crit: #f2495c;
+    --font-stack: Inter, Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg-app); color: var(--text-primary);
+    font-family: var(--font-stack); font-size: 13px; line-height: 1.4; overflow-x: hidden;
+  }
+
+  /* --- Top Nav --- */
+  .top-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 50px;
+    background: var(--bg-nav); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+  }
+  .nav-left { display: flex; align-items: center; gap: 10px; }
+  .nav-logo svg { width: 24px; height: 24px; fill: var(--accent-blue); }
+  .nav-title { font-weight: 600; font-size: 15px; color: #fff; letter-spacing: 0.2px; }
+  .nav-right { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-muted); }
+  .status-live { display: flex; align-items: center; gap: 6px; color: var(--risk-low); font-weight: 500; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--risk-low); box-shadow: 0 0 4px var(--risk-low); }
+  .status-disconnected .status-dot { background: var(--risk-crit); box-shadow: 0 0 4px var(--risk-crit); }
+  .status-disconnected { color: var(--risk-crit); }
+  .refresh-btn {
+    background: none; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 11px; transition: all 0.15s;
+  }
+  .refresh-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+  /* --- Layout --- */
+  .main-content { padding: 70px 20px 20px; max-width: 1600px; margin: 0 auto; }
+
+  /* --- Panel --- */
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .panel-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .panel-title { font-size: 11px; font-weight: 500; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+  .panel-body { padding: 16px; }
+
+  /* --- Row 1: Stats + Risk (3 stat cards + risk) --- */
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr) 1.2fr; gap: 12px; margin-bottom: 12px; }
+  .stat-panel .panel-body { padding: 14px 16px; }
+  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .stat-value { font-size: 32px; font-weight: 700; color: #fff; line-height: 1; }
+  .stat-sparkline { display: flex; align-items: flex-end; gap: 1px; height: 20px; margin-top: 8px; }
+  .stat-sparkline .bar { flex: 1; opacity: 0.6; border-radius: 1px 1px 0 0; min-width: 2px; transition: height 0.3s; }
+
+  /* Risk Segmentation Panel */
+  .risk-seg-body { display: flex; align-items: center; gap: 16px; padding: 14px 16px; }
+  .risk-donut-wrap { position: relative; width: 70px; height: 70px; flex-shrink: 0; }
+  .risk-donut-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .risk-donut-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 11px; font-weight: 700; color: #fff; text-align: center; line-height: 1.1;
+  }
+  .risk-legend { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+  .risk-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .risk-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .risk-legend-label { color: var(--text-muted); flex: 1; }
+  .risk-legend-count { font-weight: 600; color: var(--text-primary); min-width: 24px; text-align: right; }
+
+  /* --- Row 2: Viz --- */
+  .viz-row { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .timeline-chart { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 10px; }
+  .timeline-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .timeline-bar {
+    width: 100%; border-radius: 2px 2px 0 0; min-height: 1px;
+    background: var(--accent-blue); opacity: 0.7; transition: height 0.3s; position: relative;
+  }
+  .timeline-bar:hover { opacity: 1; }
+  .timeline-bar .tooltip {
+    display: none; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; padding: 3px 6px; border-radius: 3px; font-size: 10px; white-space: nowrap; z-index: 10;
+  }
+  .timeline-bar:hover .tooltip { display: block; }
+  .timeline-label { font-size: 9px; color: var(--text-muted); margin-top: 4px; writing-mode: vertical-rl; transform: rotate(180deg); height: 30px; }
+
+  .top-list { list-style: none; }
+  .top-list-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .top-list-item:last-child { border-bottom: none; }
+  .top-list-rank { font-size: 10px; color: var(--text-muted); width: 16px; text-align: center; }
+  .top-list-name { flex: 1; font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-list-count { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 30px; text-align: right; }
+  .top-list-bar-bg { flex: 0 0 80px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .top-list-bar-fill { height: 100%; border-radius: 3px; background: var(--accent-blue); transition: width 0.3s; }
+  .empty-state { color: var(--text-muted); font-size: 12px; text-align: center; padding: 30px 0; }
+
+  /* --- Row 3: Event Log --- */
+  .log-panel { display: flex; flex-direction: column; }
+  .log-controls { display: flex; align-items: center; gap: 8px; }
+  .filter-input, .risk-filter {
+    background: var(--bg-app); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-primary); padding: 5px 10px; font-size: 12px; outline: none; transition: border-color 0.15s;
+  }
+  .filter-input { width: 200px; }
+  .risk-filter { width: 120px; cursor: pointer; }
+  .filter-input:focus, .risk-filter:focus { border-color: var(--accent-blue); }
+  .filter-input::placeholder { color: var(--text-muted); }
+  .risk-filter option { background: var(--bg-panel); color: var(--text-primary); }
+
+  .log-table-wrap { overflow-y: auto; max-height: 55vh; }
+  table.log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .log-table thead { position: sticky; top: 0; z-index: 2; }
+  .log-table th {
+    background: var(--bg-nav); color: var(--text-muted); font-weight: 500;
+    text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;
+    padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+  }
+  .log-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .log-table tr.log-row:hover td { background: var(--bg-hover); }
+  .log-table tr.expanded td { background: var(--bg-hover); border-bottom-color: transparent; }
+  .log-time { font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; font-size: 11px; }
+
+  /* Risk left-border on rows */
+  .log-row.risk-low td:first-child { border-left: 3px solid var(--risk-low); }
+  .log-row.risk-med td:first-child { border-left: 3px solid var(--risk-med); }
+  .log-row.risk-high td:first-child { border-left: 3px solid var(--risk-high); }
+  .log-row.risk-crit td:first-child { border-left: 3px solid var(--risk-crit); }
+
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .badge-net { background: rgba(115,191,105,0.15); color: var(--risk-low); }
+  .badge-proc { background: rgba(242,73,92,0.15); color: var(--risk-crit); }
+  .badge-status { background: rgba(142,142,142,0.15); color: var(--text-muted); }
+
+  .risk-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .risk-badge.risk-low { background: rgba(115,191,105,0.18); color: var(--risk-low); }
+  .risk-badge.risk-med { background: rgba(242,204,12,0.18); color: var(--risk-med); }
+  .risk-badge.risk-high { background: rgba(255,152,48,0.18); color: var(--risk-high); }
+  .risk-badge.risk-crit { background: rgba(242,73,92,0.18); color: var(--risk-crit); }
+
+  .log-detail { color: var(--text-primary); word-break: break-all; }
+  .log-size { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+
+  .log-expand-row td { padding: 0 !important; border-bottom: 1px solid var(--border); }
+  .log-json {
+    background: #0d0e11; padding: 10px 16px; font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-muted); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto;
+  }
+  .log-row-clickable { cursor: pointer; }
+
+  /* --- Process Tree Styling --- */
+  .proc-tree {
+    display: inline-flex; align-items: center; gap: 0;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+    flex-wrap: wrap;
+  }
+  .proc-tree-user {
+    color: var(--accent-blue); font-weight: 600; margin-right: 6px;
+  }
+  .proc-tree-node {
+    color: var(--text-primary); font-weight: 500;
+    padding: 1px 5px; border-radius: 3px;
+    background: rgba(50,116,217,0.1);
+  }
+  .proc-tree-node.proc-leaf {
+    background: rgba(242,73,92,0.18); color: var(--risk-crit); font-weight: 700;
+  }
+  .proc-tree-arrow {
+    color: var(--risk-high); font-weight: 700; margin: 0 3px; font-size: 13px;
+  }
+  .proc-args {
+    display: block; margin-top: 3px; font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-mono); word-break: break-all; max-width: 600px;
+  }
+  .file-detail-name {
+    color: var(--text-primary); font-weight: 600; margin-right: 4px;
+  }
+  .file-detail-path {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    word-break: break-all; display: inline-block; max-width: 500px;
+  }
+
+  @media (max-width: 1100px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .viz-row { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .stats-row { grid-template-columns: 1fr; }
+    .nav-title { font-size: 13px; }
+    .filter-input { width: 120px; }
+    .risk-filter { width: 90px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="nav-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.67-3.13 8.95-7 10.16-3.87-1.21-7-5.49-7-10.16V6.3l7-3.12zM11 7v2h2V7h-2zm0 4v6h2v-6h-2z"/></svg>
+    </div>
+    <span class="nav-title">Outbound Traffic Monitor</span>
+  </div>
+  <div class="nav-right">
+    <span id="connStatus" class="status-live"><span class="status-dot"></span>Live</span>
+    <span>Last 1 hour</span>
+    <button class="refresh-btn" onclick="fetchStats()" title="Refresh">&#x21bb; Refresh</button>
+  </div>
+</nav>
+
+<div class="main-content">
+
+  <!-- Row 1: Stats + Classification Segmentation -->
+  <div class="stats-row">
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Total Events</div>
+        <div class="stat-value" id="statTotal">0</div>
+        <div class="stat-sparkline" id="sparkTotal"></div>
+      </div>
+    </div>
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Network Uploads</div>
+        <div class="stat-value" id="statNet" style="color:#5b9bd5">0</div>
+        <div class="stat-sparkline" id="sparkNet"></div>
+      </div>
+    </div>
+    <div class="panel stat-panel">
+      <div class="panel-body">
+        <div class="stat-label">Processes</div>
+        <div class="stat-value" id="statProc" style="color:#c78dfc">0</div>
+        <div class="stat-sparkline" id="sparkProc"></div>
+      </div>
+    </div>
+    <!-- Classification Segmentation Panel -->
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Classification Breakdown</span></div>
+      <div class="risk-seg-body">
+        <div class="risk-donut-wrap">
+          <svg viewBox="0 0 36 36" id="riskDonut">
+            <circle cx="18" cy="18" r="15.915" fill="none" stroke="#2c323c" stroke-width="3"/>
+          </svg>
+          <div class="risk-donut-center" id="riskDonutLabel">0</div>
+        </div>
+        <div class="risk-legend" id="riskLegend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Visualizations -->
+  <div class="viz-row">
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Event Timeline (last 30 min)</span></div>
+      <div class="panel-body">
+        <div class="timeline-chart" id="timelineChart"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Top Destinations / Processes</span></div>
+      <div class="panel-body">
+        <ul class="top-list" id="topList"><li class="empty-state">Waiting for data…</li></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3: Event Log -->
+  <div class="panel log-panel">
+    <div class="panel-header">
+      <span class="panel-title">Live Event Stream</span>
+      <div class="log-controls">
+        <select class="risk-filter" id="riskFilter">
+          <option value="all">All Classifications</option>
+          <option value="known_safe">Known Safe</option>
+          <option value="unknown">Unknown</option>
+          <option value="suspicious">Suspicious</option>
+        </select>
+        <input type="text" class="filter-input" id="filterInput" placeholder="Filter events…">
+      </div>
+    </div>
+    <div class="log-table-wrap" id="logTableWrap">
+      <table class="log-table">
+        <thead><tr><th>Time</th><th>Classification</th><th>Type</th><th>Process Tree / Source</th><th>Details</th><th>Risk Factors</th><th>Size</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  var MAX_LOG_ROWS = 300;
+  var TIMELINE_BUCKETS = 30;
+  var SPARK_HISTORY = 20;
+
+ var CLASS_COLORS = { known_safe: '#4caf84', unknown: '#f2cc0c', suspicious: '#d94f4f' };
+ var CLASS_LABELS = { known_safe: 'Known Safe', unknown: 'Unknown', suspicious: 'Suspicious' };
+ var FACTOR_COLORS = {
+ LOCAL_NETWORK: '#4caf84', PUBLIC_INTERNET: '#5b9bd5',
+ TMP_EXECUTION: '#d94f4f', DOWNLOADS_FOLDER_EXECUTION: '#d94f4f',
+ OBFUSCATED_ARGS: '#d94f4f', SUSPICIOUS_ANCESTRY: '#d94f4f',
+ USER_SPACE_BINARY: '#f2cc0c', INTERPRETER_EXECUTION: '#f2cc0c',
+ UNKNOWN_SCRIPT: '#f2cc0c', MASSIVE_UPLOAD: '#ff9830',
+ NON_STANDARD_PORT: '#ff9830', LARGE_RAW_PAYLOAD: '#ff9830'
+ };
+
+ var state = {
+ total: 0, net: 0, proc: 0,
+ classification: { known_safe: 0, unknown: 0, suspicious: 0 },
+ timeline: new Array(TIMELINE_BUCKETS).fill(0),
+ timelineLabels: [],
+ sparkTotal: [], sparkNet: [], sparkProc: [],
+ dstIps: {}, procs: {},
+ connected: false,
+ userScrolled: false,
+ filterText: '',
+ classFilterVal: 'all'
+ };
+
+  function initTimelineLabels() {
+    var now = new Date();
+    state.timelineLabels = [];
+    for (var i = TIMELINE_BUCKETS - 1; i >= 0; i--) {
+      var t = new Date(now.getTime() - i * 60000);
+      state.timelineLabels.push(pad2(t.getHours()) + ':' + pad2(t.getMinutes()));
+    }
+  }
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  initTimelineLabels();
+
+  // DOM
+  var elStatTotal = document.getElementById('statTotal');
+  var elStatNet = document.getElementById('statNet');
+  var elStatProc = document.getElementById('statProc');
+  var elSparkTotal = document.getElementById('sparkTotal');
+  var elSparkNet = document.getElementById('sparkNet');
+  var elSparkProc = document.getElementById('sparkProc');
+  var elTimeline = document.getElementById('timelineChart');
+  var elTopList = document.getElementById('topList');
+  var elLogBody = document.getElementById('logBody');
+  var elLogWrap = document.getElementById('logTableWrap');
+  var elFilter = document.getElementById('filterInput');
+  var elRiskFilter = document.getElementById('riskFilter');
+  var elConnStatus = document.getElementById('connStatus');
+  var elRiskDonut = document.getElementById('riskDonut');
+  var elRiskDonutLabel = document.getElementById('riskDonutLabel');
+  var elRiskLegend = document.getElementById('riskLegend');
+
+  elLogWrap.addEventListener('scroll', function() {
+    state.userScrolled = (elLogWrap.scrollHeight - elLogWrap.scrollTop - elLogWrap.clientHeight) > 40;
+  });
+
+  elFilter.addEventListener('input', function() { state.filterText = this.value.toLowerCase(); applyFilters(); });
+ elRiskFilter.addEventListener('change', function() { state.classFilterVal = this.value; applyFilters(); });
+
+ function applyFilters() {
+ var rows = elLogBody.querySelectorAll('tr.log-row');
+ for (var i = 0; i < rows.length; i++) {
+ var text = rows[i].getAttribute('data-search') || '';
+ var cls = rows[i].getAttribute('data-classification') || '';
+ var matchText = !state.filterText || text.indexOf(state.filterText) !== -1;
+ var matchClass = state.classFilterVal === 'all' || cls === state.classFilterVal;
+ var show = matchText && matchClass;
+ rows[i].style.display = show ? '' : 'none';
+ var next = rows[i].nextElementSibling;
+ if (next && next.classList.contains('log-expand-row')) {
+ next.style.display = show && rows[i].classList.contains('expanded') ? '' : 'none';
+ }
+ }
+ }
+
+ // Risk factors are now computed server-side; no client assessRisk needed
+
+  // --- Render Stats ---
+  function renderStats() {
+    elStatTotal.textContent = state.total.toLocaleString();
+    elStatNet.textContent = state.net.toLocaleString();
+    elStatProc.textContent = state.proc.toLocaleString();
+    renderSparkline(elSparkTotal, state.sparkTotal, '#3274d9');
+    renderSparkline(elSparkNet, state.sparkNet, RISK_COLORS.low);
+    renderSparkline(elSparkProc, state.sparkProc, RISK_COLORS.crit);
+  }
+
+  function renderSparkline(container, data, color) {
+    if (!data.length) { container.innerHTML = ''; return; }
+    var max = Math.max.apply(null, data) || 1;
+    var html = '';
+    for (var i = 0; i < data.length; i++) {
+      var h = Math.max(1, Math.round((data[i] / max) * 20));
+      html += '<div class="bar" style="height:' + h + 'px;background:' + color + '"></div>';
+    }
+    container.innerHTML = html;
+  }
+
+  // --- Risk Donut ---
+ function renderRiskDonut() {
+ var c = state.classification;
+ var total = c.known_safe + c.unknown + c.suspicious;
+ elRiskDonutLabel.textContent = total;
+
+ if (total === 0) {
+ elRiskDonut.innerHTML = '<circle cx="18" cy="18" r="15.915" fill="none" stroke="#2c323c" stroke-width="3"/>';
+ elRiskLegend.innerHTML = '<div class="risk-legend-item" style="color:var(--text-muted)">No events yet</div>';
+ return;
+ }
+
+ var segments = [
+ { key: 'suspicious', val: c.suspicious, color: CLASS_COLORS.suspicious },
+ { key: 'unknown', val: c.unknown, color: CLASS_COLORS.unknown },
+ { key: 'known_safe', val: c.known_safe, color: CLASS_COLORS.known_safe }
+ ];
+
+ var svgParts = [];
+ var offset = 0;
+ var circumference = 100;
+ for (var i = 0; i < segments.length; i++) {
+ var pct = (segments[i].val / total) * circumference;
+ if (pct > 0) {
+ svgParts.push('<circle cx="18" cy="18" r="15.915" fill="none" stroke="' + segments[i].color + '" stroke-width="3" stroke-dasharray="' + pct.toFixed(2) + ' ' + (circumference - pct).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>');
+ offset += pct;
+ }
+ }
+ elRiskDonut.innerHTML = svgParts.join('');
+
+ var legendHtml = '';
+ for (var i = 0; i < segments.length; i++) {
+ legendHtml += '<div class="risk-legend-item">' +
+ '<div class="risk-legend-dot" style="background:' + segments[i].color + '"></div>' +
+ '<span class="risk-legend-label">' + CLASS_LABELS[segments[i].key] + '</span>' +
+ '<span class="risk-legend-count">' + segments[i].val + '</span>' +
+ '</div>';
+ }
+ elRiskLegend.innerHTML = legendHtml;
+ }
+
+  // --- Timeline ---
+  function renderTimeline() {
+    var max = Math.max.apply(null, state.timeline) || 1;
+    var html = '';
+    for (var i = 0; i < TIMELINE_BUCKETS; i++) {
+      var h = Math.max(1, Math.round((state.timeline[i] / max) * 130));
+      var label = state.timelineLabels[i] || '';
+      html += '<div class="timeline-bar-wrap">' +
+        '<div class="timeline-bar" style="height:' + h + 'px">' +
+        '<div class="tooltip">' + label + ' — ' + state.timeline[i] + ' events</div>' +
+        '</div>' +
+        (i % 5 === 0 ? '<div class="timeline-label">' + label + '</div>' : '<div class="timeline-label"></div>') +
+        '</div>';
+    }
+    elTimeline.innerHTML = html;
+  }
+
+  // --- Top List ---
+  function renderTopList() {
+    var items = [];
+    for (var k in state.dstIps) items.push({ name: k, count: state.dstIps[k], type: 'net' });
+    for (var k in state.procs) items.push({ name: k, count: state.procs[k], type: 'proc' });
+    items.sort(function(a, b) { return b.count - a.count; });
+    items = items.slice(0, 10);
+    if (!items.length) { elTopList.innerHTML = '<li class="empty-state">Waiting for data…</li>'; return; }
+    var max = items[0].count || 1;
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      var pct = Math.round((items[i].count / max) * 100);
+      var color = items[i].type === 'net' ? RISK_COLORS.low : RISK_COLORS.crit;
+      html += '<li class="top-list-item">' +
+        '<span class="top-list-rank">' + (i + 1) + '</span>' +
+        '<span class="top-list-name">' + esc(items[i].name) + '</span>' +
+        '<div class="top-list-bar-bg"><div class="top-list-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+        '<span class="top-list-count">' + items[i].count + '</span></li>';
+    }
+    elTopList.innerHTML = html;
+  }
+
+  // --- Event Log Helpers ---
+  function getCat(type) {
+    if (type === 'network') return 'net';
+    if (type === 'endpoint_process') return 'proc';
+    return 'status';
+  }
+  function badgeClass(c) { return c === 'net' ? 'badge-net' : c === 'proc' ? 'badge-proc' : 'badge-status'; }
+  function badgeLabel(c) { return c === 'net' ? 'NET' : c === 'proc' ? 'PROC' : 'STATUS'; }
+
+  function buildProcessTreeHtml(e) {
+    var tree = e.processTree;
+    var user = e.user || '';
+    if (!tree || !tree.length) {
+      return '<span class="proc-tree"><span class="proc-tree-node proc-leaf">' + esc(e.comm || '?') + '</span></span>';
+    }
+    var html = '<span class="proc-tree">';
+    if (user) {
+      html += '<span class="proc-tree-user">' + esc(user) + '@</span>';
+    }
+    for (var i = 0; i < tree.length; i++) {
+      var isLeaf = (i === tree.length - 1);
+      html += '<span class="proc-tree-node' + (isLeaf ? ' proc-leaf' : '') + '">' + esc(tree[i]) + '</span>';
+      if (i < tree.length - 1) {
+        html += '<span class="proc-tree-arrow">→</span>';
+      }
+    }
+    html += '</span>';
+    if (e.args && e.args !== e.comm) {
+      html += '<span class="proc-args">' + esc(e.args) + '</span>';
+    }
+    return html;
+  }
+
+  function evtSource(e, c) {
+    if (c === 'net') return (e.srcIp||'') + ' → ' + (e.dstIp||'') + ':' + (e.dstPort||'');
+    if (c === 'proc') return ''; // handled by buildProcessTreeHtml
+    return e.message || '';
+  }
+  function evtDetail(e, c) {
+    if (c === 'net') return (e.proto||'TCP') + ' upload';
+    if (c === 'proc') {
+      var parts = [];
+      if (e.matchedPattern) parts.push(e.matchedPattern);
+      if (e.filePath) {
+        var basename = e.filePath.split('/').pop() || e.filePath;
+        parts.push('<span class="file-detail-name">' + esc(basename) + '</span>');
+        parts.push('<span class="file-detail-path">' + esc(e.filePath) + '</span>');
+      }
+      return parts.join(' · ') || '';
+    }
+    return '';
+  }
+  function evtSize(e, c) {
+    if (c === 'net') return fmtB(e.bytes);
+    if (c === 'proc' && e.fileSizeBytes != null) return formatBytes(e.fileSizeBytes);
+    return '—';
+  }
+  function fmtB(b) {
+    if (b == null) return '—';
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(2) + ' MB';
+  }
+  function formatBytes(bytes) {
+    if (bytes == null) return '—';
+    if (bytes < 1024) return '<strong>' + bytes + ' bytes</strong>';
+    if (bytes < 1048576) return '<strong>' + (bytes / 1024).toFixed(1) + ' KB</strong>';
+    if (bytes < 1073741824) return '<strong>' + (bytes / 1048576).toFixed(2) + ' MB</strong>';
+    return '<strong>' + (bytes / 1073741824).toFixed(2) + ' GB</strong>';
+  }
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+ function addLogRow(e) {
+ var cat = getCat(e.type);
+ var time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--:--:--';
+ var details = evtDetail(e, cat);
+ var size = evtSize(e, cat);
+ var classification = e.classification || 'unknown';
+ var riskFactors = e.riskFactors || [];
+
+ var sourceHtml;
+ if (cat === 'proc') {
+ sourceHtml = buildProcessTreeHtml(e);
+ } else {
+ sourceHtml = esc(evtSource(e, cat));
+ }
+
+ // Build risk factor badges
+ var factorsHtml = '';
+ for (var i = 0; i < riskFactors.length; i++) {
+ var f = riskFactors[i];
+ var fc = FACTOR_COLORS[f] || '#7a8fa0';
+ factorsHtml += '<span class="risk-factor-tag" style="background:' + fc + '22;color:' + fc + ';border:1px solid ' + fc + '44;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;display:inline-block">' + esc(f) + '</span>';
+ }
+ if (!factorsHtml) factorsHtml = '<span style="color:var(--text-muted)">—</span>';
+
+ var searchText = [e.type, e.comm, e.args, e.user, details, size, e.dstIp, e.srcIp, e.message, CLASS_LABELS[classification]];
+ if (e.processTree) searchText = searchText.concat(e.processTree);
+ if (riskFactors.length) searchText = searchText.concat(riskFactors);
+ var searchStr = searchText.join(' ').toLowerCase();
+
+ var tr = document.createElement('tr');
+ tr.className = 'log-row log-row-clickable class-' + classification;
+ tr.setAttribute('data-search', searchStr);
+ tr.setAttribute('data-classification', classification);
+ tr.style.borderLeft = '3px solid ' + (CLASS_COLORS[classification] || '#7a8fa0');
+ tr.innerHTML =
+ '<td class="log-time">' + time + '</td>' +
+ '<td><span class="risk-badge class-' + classification + '" style="background:' + (CLASS_COLORS[classification]||'#7a8fa0') + '22;color:' + (CLASS_COLORS[classification]||'#7a8fa0') + '">' + (CLASS_LABELS[classification]||classification) + '</span></td>' +
+ '<td><span class="badge ' + badgeClass(cat) + '">' + badgeLabel(cat) + '</span></td>' +
+ '<td class="log-detail">' + sourceHtml + '</td>' +
+ '<td class="log-detail">' + esc(details) + '</td>' +
+ '<td class="log-detail">' + factorsHtml + '</td>' +
+ '<td class="log-size">' + size + '</td>';
+
+ var trEx = document.createElement('tr');
+ trEx.className = 'log-expand-row';
+ trEx.style.display = 'none';
+ trEx.innerHTML = '<td colspan="7"><div class="log-json">' + esc(JSON.stringify(e, null, 2)) + '</div></td>';
+
+ tr.addEventListener('click', function() {
+ var exp = tr.classList.toggle('expanded');
+ trEx.style.display = exp ? '' : 'none';
+ });
+
+ elLogBody.appendChild(tr);
+ elLogBody.appendChild(trEx);
+
+ var matchText = !state.filterText || searchStr.indexOf(state.filterText) !== -1;
+ var matchClass = state.classFilterVal === 'all' || classification === state.classFilterVal;
+ if (!(matchText && matchClass)) { tr.style.display = 'none'; trEx.style.display = 'none'; }
+
+ while (elLogBody.children.length > MAX_LOG_ROWS * 2) {
+ elLogBody.removeChild(elLogBody.firstChild);
+ elLogBody.removeChild(elLogBody.firstChild);
+ }
+ if (!state.userScrolled) elLogWrap.scrollTop = elLogWrap.scrollHeight;
+ }
+
+  // --- Process Event ---
+ function processEvent(e) {
+ state.total++;
+ var cat = getCat(e.type);
+ if (cat === 'net') state.net++;
+ else if (cat === 'proc') state.proc++;
+
+ var cls = e.classification || 'unknown';
+ if (state.classification[cls] !== undefined) state.classification[cls]++;
+
+ state.timeline[TIMELINE_BUCKETS - 1]++;
+ state.sparkTotal.push(state.total); if (state.sparkTotal.length > SPARK_HISTORY) state.sparkTotal.shift();
+ if (cat==='net') { state.sparkNet.push(state.net); if (state.sparkNet.length > SPARK_HISTORY) state.sparkNet.shift(); }
+ if (cat==='proc') { state.sparkProc.push(state.proc); if (state.sparkProc.length > SPARK_HISTORY) state.sparkProc.shift(); }
+
+ if (cat === 'net' && e.dstIp) state.dstIps[e.dstIp] = (state.dstIps[e.dstIp]||0) + 1;
+ if (cat === 'proc' && e.comm) { var k = e.comm + (e.args ? ' '+e.args : ''); state.procs[k] = (state.procs[k]||0) + 1; }
+
+ addLogRow(e);
+ renderStats();
+ renderRiskDonut();
+ }
+
+  // --- SSE ---
+  var reconnectDelay = 1000;
+  function connectSSE() {
+    var es = new EventSource('/events');
+    es.onopen = function() { state.connected = true; reconnectDelay = 1000; updateConn(); };
+    es.onmessage = function(msg) { try { processEvent(JSON.parse(msg.data)); } catch(ex){} };
+    es.onerror = function() {
+      es.close(); state.connected = false; updateConn();
+      setTimeout(connectSSE, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+  }
+  function updateConn() {
+    if (state.connected) { elConnStatus.className='status-live'; elConnStatus.innerHTML='<span class="status-dot"></span>Live'; }
+    else { elConnStatus.className='status-live status-disconnected'; elConnStatus.innerHTML='<span class="status-dot"></span>Reconnecting…'; }
+  }
+
+  // --- Stats API ---
+  function fetchStats() {
+ fetch('/api/stats').then(function(r){return r.json();}).then(function(s){
+ state.total = s.totalEvents||0; state.net = s.networkCount||0;
+ state.proc = s.endpointProcessCount||0;
+ state.classification.known_safe = s.knownSafeCount||0;
+ state.classification.unknown = s.unknownCount||0;
+ state.classification.suspicious = s.suspiciousCount||0;
+ if (s.topDstIps) { state.dstIps={}; for(var i=0;i<s.topDstIps.length;i++) state.dstIps[s.topDstIps[i].ip]=s.topDstIps[i].count; }
+ if (s.topProcesses) { state.procs={}; for(var i=0;i<s.topProcesses.length;i++) state.procs[s.topProcesses[i].comm]=s.topProcesses[i].count; }
+ renderStats(); renderTopList(); renderRiskDonut();
+ }).catch(function(){});
+  }
+
+  // Timeline tick
+  setInterval(function(){
+    state.timeline.shift(); state.timeline.push(0);
+    var now=new Date();
+    state.timelineLabels.shift();
+    state.timelineLabels.push(pad2(now.getHours())+':'+pad2(now.getMinutes()));
+    renderTimeline();
+  }, 60000);
+
+  // Init
+  renderStats(); renderTimeline(); renderTopList(); renderRiskDonut();
+  connectSSE(); fetchStats(); setInterval(fetchStats, 2000);
+})();
+</script>
+</body>
+</html>

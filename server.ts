@@ -4,8 +4,8 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { startNetworkCapture, type CaptureEvent } from "./capture";
+import { assessRisk, type RiskAssessment } from "./risk";
 import { startEndpointMonitor, type EndpointEvent } from "./endpoint";
-
 const PORT = 3777;
 const HOST = "127.0.0.1";
 const MAX_EVENTS = 500;
@@ -48,7 +48,7 @@ class RingBuffer<T> {
 // --- Event Store & Stats ---
 type TrackerEvent = CaptureEvent | EndpointEvent;
 
-interface TrackedEvent {
+interface TrackedEvent extends RiskAssessment {
 	type: string;
 	timestamp?: string;
 	dstIp?: string;
@@ -74,20 +74,45 @@ interface StatsResponse {
 	topDstIps: DstIpEntry[];
 	topProcesses: ProcessEntry[];
 	lastEventTimestamp: string | null;
+	knownSafeCount: number;
+	unknownCount: number;
+	suspiciousCount: number;
 }
 
 const eventStore = new RingBuffer<TrackedEvent>(MAX_EVENTS);
 let networkCount = 0;
 let endpointFileCount = 0;
 let endpointProcessCount = 0;
+let knownSafeCount = 0;
+let unknownCount = 0;
+let suspiciousCount = 0;
 let lastEventTimestamp: string | null = null;
 const dstIpCounts = new Map<string, number>();
 const processCommCounts = new Map<string, number>();
 
 function recordEvent(e: TrackerEvent): void {
-	const tracked = e as TrackedEvent;
+	const risk = assessRisk(e as Parameters<typeof assessRisk>[0]);
+	const tracked: TrackedEvent = {
+		...e,
+		riskLevel: risk.riskLevel,
+		riskScore: risk.riskScore,
+		classification: risk.classification,
+		riskFactors: risk.riskFactors,
+	};
 	eventStore.push(tracked);
 	lastEventTimestamp = tracked.timestamp ?? new Date().toISOString();
+
+	switch (tracked.classification) {
+		case "known_safe":
+			knownSafeCount++;
+			break;
+		case "unknown":
+			unknownCount++;
+			break;
+		case "suspicious":
+			suspiciousCount++;
+			break;
+	}
 
 	switch (tracked.type) {
 		case "network":
@@ -127,6 +152,9 @@ function getStats(): StatsResponse {
 		topDstIps,
 		topProcesses,
 		lastEventTimestamp,
+		knownSafeCount,
+		unknownCount,
+		suspiciousCount,
 	};
 }
 

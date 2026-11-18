@@ -228,11 +228,11 @@
 
 <div class="main-content">
 
-  <!-- Row 1: Stats + Risk Segmentation (no file card) -->
+  <!-- Row 1: Stats + Classification Segmentation -->
   <div class="stats-row">
     <div class="panel stat-panel">
       <div class="panel-body">
-        <div class="stat-label">Total Outbound Events</div>
+        <div class="stat-label">Total Events</div>
         <div class="stat-value" id="statTotal">0</div>
         <div class="stat-sparkline" id="sparkTotal"></div>
       </div>
@@ -240,20 +240,20 @@
     <div class="panel stat-panel">
       <div class="panel-body">
         <div class="stat-label">Network Uploads</div>
-        <div class="stat-value" id="statNet" style="color:var(--risk-low)">0</div>
+        <div class="stat-value" id="statNet" style="color:#5b9bd5">0</div>
         <div class="stat-sparkline" id="sparkNet"></div>
       </div>
     </div>
     <div class="panel stat-panel">
       <div class="panel-body">
-        <div class="stat-label">Suspicious Processes</div>
-        <div class="stat-value" id="statProc" style="color:var(--risk-crit)">0</div>
+        <div class="stat-label">Processes</div>
+        <div class="stat-value" id="statProc" style="color:#c78dfc">0</div>
         <div class="stat-sparkline" id="sparkProc"></div>
       </div>
     </div>
-    <!-- Risk Segmentation Panel -->
+    <!-- Classification Segmentation Panel -->
     <div class="panel">
-      <div class="panel-header"><span class="panel-title">Risk Segmentation</span></div>
+      <div class="panel-header"><span class="panel-title">Classification Breakdown</span></div>
       <div class="risk-seg-body">
         <div class="risk-donut-wrap">
           <svg viewBox="0 0 36 36" id="riskDonut">
@@ -288,18 +288,17 @@
       <span class="panel-title">Live Event Stream</span>
       <div class="log-controls">
         <select class="risk-filter" id="riskFilter">
-          <option value="all">All Risks</option>
-          <option value="crit">🔴 Critical</option>
-          <option value="high">🟠 High</option>
-          <option value="med">🟡 Medium</option>
-          <option value="low">🟢 Low</option>
+          <option value="all">All Classifications</option>
+          <option value="known_safe">🟢 Known Safe</option>
+          <option value="unknown">🟡 Unknown</option>
+          <option value="suspicious">🔴 Suspicious</option>
         </select>
         <input type="text" class="filter-input" id="filterInput" placeholder="Filter events…">
       </div>
     </div>
     <div class="log-table-wrap" id="logTableWrap">
       <table class="log-table">
-        <thead><tr><th>Time</th><th>Risk</th><th>Type</th><th>Process Tree / Source</th><th>Details</th><th>Size</th></tr></thead>
+        <thead><tr><th>Time</th><th>Classification</th><th>Type</th><th>Process Tree / Source</th><th>Details</th><th>Risk Factors</th><th>Size</th></tr></thead>
         <tbody id="logBody"></tbody>
       </table>
     </div>
@@ -315,25 +314,29 @@
   var TIMELINE_BUCKETS = 30;
   var SPARK_HISTORY = 20;
 
-  var RISK_COLORS = { low: '#73bf69', med: '#f2cc0c', high: '#ff9830', crit: '#f2495c' };
-  var RISK_LABELS = { low: 'Low', med: 'Medium', high: 'High', crit: 'Critical' };
+ var CLASS_COLORS = { known_safe: '#4caf84', unknown: '#f2cc0c', suspicious: '#d94f4f' };
+ var CLASS_LABELS = { known_safe: 'Known Safe', unknown: 'Unknown', suspicious: 'Suspicious' };
+ var FACTOR_COLORS = {
+ LOCAL_NETWORK: '#4caf84', PUBLIC_INTERNET: '#5b9bd5',
+ TMP_EXECUTION: '#d94f4f', DOWNLOADS_FOLDER_EXECUTION: '#d94f4f',
+ OBFUSCATED_ARGS: '#d94f4f', SUSPICIOUS_ANCESTRY: '#d94f4f',
+ USER_SPACE_BINARY: '#f2cc0c', INTERPRETER_EXECUTION: '#f2cc0c',
+ UNKNOWN_SCRIPT: '#f2cc0c', MASSIVE_UPLOAD: '#ff9830',
+ NON_STANDARD_PORT: '#ff9830', LARGE_RAW_PAYLOAD: '#ff9830'
+ };
 
-  var SAFE_PORTS = { 80:1, 443:1, 53:1, 123:1, 587:1, 993:1, 995:1 };
-  var SCRIPT_COMMS = { python:1, python3:1, node:1, bash:1, sh:1, zsh:1, perl:1, ruby:1, php:1 };
-  var DANGER_COMMS = { curl:1, wget:1, nc:1, ncat:1, netcat:1, scp:1, sftp:1 };
-
-  var state = {
-    total: 0, net: 0, proc: 0,
-    risk: { low: 0, med: 0, high: 0, crit: 0 },
-    timeline: new Array(TIMELINE_BUCKETS).fill(0),
-    timelineLabels: [],
-    sparkTotal: [], sparkNet: [], sparkProc: [],
-    dstIps: {}, procs: {},
-    connected: false,
-    userScrolled: false,
-    filterText: '',
-    riskFilterVal: 'all'
-  };
+ var state = {
+ total: 0, net: 0, proc: 0,
+ classification: { known_safe: 0, unknown: 0, suspicious: 0 },
+ timeline: new Array(TIMELINE_BUCKETS).fill(0),
+ timelineLabels: [],
+ sparkTotal: [], sparkNet: [], sparkProc: [],
+ dstIps: {}, procs: {},
+ connected: false,
+ userScrolled: false,
+ filterText: '',
+ classFilterVal: 'all'
+ };
 
   function initTimelineLabels() {
     var now = new Date();
@@ -369,56 +372,25 @@
   });
 
   elFilter.addEventListener('input', function() { state.filterText = this.value.toLowerCase(); applyFilters(); });
-  elRiskFilter.addEventListener('change', function() { state.riskFilterVal = this.value; applyFilters(); });
+ elRiskFilter.addEventListener('change', function() { state.classFilterVal = this.value; applyFilters(); });
 
-  function applyFilters() {
-    var rows = elLogBody.querySelectorAll('tr.log-row');
-    for (var i = 0; i < rows.length; i++) {
-      var text = rows[i].getAttribute('data-search') || '';
-      var risk = rows[i].getAttribute('data-risk') || '';
-      var matchText = !state.filterText || text.indexOf(state.filterText) !== -1;
-      var matchRisk = state.riskFilterVal === 'all' || risk === state.riskFilterVal;
-      var show = matchText && matchRisk;
-      rows[i].style.display = show ? '' : 'none';
-      var next = rows[i].nextElementSibling;
-      if (next && next.classList.contains('log-expand-row')) {
-        next.style.display = show && rows[i].classList.contains('expanded') ? '' : 'none';
-      }
-    }
-  }
+ function applyFilters() {
+ var rows = elLogBody.querySelectorAll('tr.log-row');
+ for (var i = 0; i < rows.length; i++) {
+ var text = rows[i].getAttribute('data-search') || '';
+ var cls = rows[i].getAttribute('data-classification') || '';
+ var matchText = !state.filterText || text.indexOf(state.filterText) !== -1;
+ var matchClass = state.classFilterVal === 'all' || cls === state.classFilterVal;
+ var show = matchText && matchClass;
+ rows[i].style.display = show ? '' : 'none';
+ var next = rows[i].nextElementSibling;
+ if (next && next.classList.contains('log-expand-row')) {
+ next.style.display = show && rows[i].classList.contains('expanded') ? '' : 'none';
+ }
+ }
+ }
 
-  // --- Risk Assessment ---
-  function assessRisk(e) {
-    var type = e.type || '';
-    var bytes = 0;
-    var comm = '';
-    var dstPort = 0;
-    var dstIp = '';
-
-    if (type === 'network') {
-      bytes = e.bytes || 0;
-      dstPort = e.dstPort || 0;
-      dstIp = e.dstIp || '';
-      comm = e.comm || '';
-    } else if (type === 'endpoint_process') {
-      comm = (e.comm || '').toLowerCase();
-      bytes = e.fileSizeBytes || e.size || 0;
-    }
-
-    if (bytes > 1048576) return 'crit';
-    if (DANGER_COMMS[comm] && type === 'network' && !isPrivateIp(dstIp)) return 'crit';
-    if (bytes > 10240) return 'high';
-    if (SCRIPT_COMMS[comm] && type === 'network') return 'high';
-    if (bytes > 512 && bytes <= 10240) return 'med';
-    if (SAFE_PORTS[dstPort] && bytes > 512) return 'med';
-
-    return 'low';
-  }
-
-  function isPrivateIp(ip) {
-    if (!ip) return false;
-    return ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('127.') || ip.startsWith('172.16.') || ip.startsWith('172.17.') || ip.startsWith('172.18.') || ip.startsWith('172.19.') || ip.startsWith('172.2') || ip.startsWith('172.3') || ip === '::1';
-  }
+ // Risk factors are now computed server-side; no client assessRisk needed
 
   // --- Render Stats ---
   function renderStats() {
@@ -442,46 +414,45 @@
   }
 
   // --- Risk Donut ---
-  function renderRiskDonut() {
-    var r = state.risk;
-    var total = r.low + r.med + r.high + r.crit;
-    elRiskDonutLabel.textContent = total;
+ function renderRiskDonut() {
+ var c = state.classification;
+ var total = c.known_safe + c.unknown + c.suspicious;
+ elRiskDonutLabel.textContent = total;
 
-    if (total === 0) {
-      elRiskDonut.innerHTML = '<circle cx="18" cy="18" r="15.915" fill="none" stroke="#2c323c" stroke-width="3"/>';
-      elRiskLegend.innerHTML = '<div class="risk-legend-item" style="color:var(--text-muted)">No events yet</div>';
-      return;
-    }
+ if (total === 0) {
+ elRiskDonut.innerHTML = '<circle cx="18" cy="18" r="15.915" fill="none" stroke="#2c323c" stroke-width="3"/>';
+ elRiskLegend.innerHTML = '<div class="risk-legend-item" style="color:var(--text-muted)">No events yet</div>';
+ return;
+ }
 
-    var segments = [
-      { key: 'crit', val: r.crit, color: RISK_COLORS.crit },
-      { key: 'high', val: r.high, color: RISK_COLORS.high },
-      { key: 'med',  val: r.med,  color: RISK_COLORS.med },
-      { key: 'low',  val: r.low,  color: RISK_COLORS.low }
-    ];
+ var segments = [
+ { key: 'suspicious', val: c.suspicious, color: CLASS_COLORS.suspicious },
+ { key: 'unknown', val: c.unknown, color: CLASS_COLORS.unknown },
+ { key: 'known_safe', val: c.known_safe, color: CLASS_COLORS.known_safe }
+ ];
 
-    var svgParts = [];
-    var offset = 0;
-    var circumference = 100;
-    for (var i = 0; i < segments.length; i++) {
-      var pct = (segments[i].val / total) * circumference;
-      if (pct > 0) {
-        svgParts.push('<circle cx="18" cy="18" r="15.915" fill="none" stroke="' + segments[i].color + '" stroke-width="3" stroke-dasharray="' + pct.toFixed(2) + ' ' + (circumference - pct).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>');
-        offset += pct;
-      }
-    }
-    elRiskDonut.innerHTML = svgParts.join('');
+ var svgParts = [];
+ var offset = 0;
+ var circumference = 100;
+ for (var i = 0; i < segments.length; i++) {
+ var pct = (segments[i].val / total) * circumference;
+ if (pct > 0) {
+ svgParts.push('<circle cx="18" cy="18" r="15.915" fill="none" stroke="' + segments[i].color + '" stroke-width="3" stroke-dasharray="' + pct.toFixed(2) + ' ' + (circumference - pct).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>');
+ offset += pct;
+ }
+ }
+ elRiskDonut.innerHTML = svgParts.join('');
 
-    var legendHtml = '';
-    for (var i = 0; i < segments.length; i++) {
-      legendHtml += '<div class="risk-legend-item">' +
-        '<div class="risk-legend-dot" style="background:' + segments[i].color + '"></div>' +
-        '<span class="risk-legend-label">' + RISK_LABELS[segments[i].key] + '</span>' +
-        '<span class="risk-legend-count">' + segments[i].val + '</span>' +
-        '</div>';
-    }
-    elRiskLegend.innerHTML = legendHtml;
-  }
+ var legendHtml = '';
+ for (var i = 0; i < segments.length; i++) {
+ legendHtml += '<div class="risk-legend-item">' +
+ '<div class="risk-legend-dot" style="background:' + segments[i].color + '"></div>' +
+ '<span class="risk-legend-label">' + CLASS_LABELS[segments[i].key] + '</span>' +
+ '<span class="risk-legend-count">' + segments[i].val + '</span>' +
+ '</div>';
+ }
+ elRiskLegend.innerHTML = legendHtml;
+ }
 
   // --- Timeline ---
   function renderTimeline() {
@@ -594,82 +565,95 @@
   }
   function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 
-  function addLogRow(e, risk) {
-    var cat = getCat(e.type);
-    var time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--:--:--';
-    var details = evtDetail(e, cat);
-    var size = evtSize(e, cat);
+ function addLogRow(e) {
+ var cat = getCat(e.type);
+ var time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--:--:--';
+ var details = evtDetail(e, cat);
+ var size = evtSize(e, cat);
+ var classification = e.classification || 'unknown';
+ var riskFactors = e.riskFactors || [];
 
-    // Build source cell: process tree for proc events, IP flow for net events
-    var sourceHtml;
-    if (cat === 'proc') {
-      sourceHtml = buildProcessTreeHtml(e);
-    } else {
-      sourceHtml = esc(evtSource(e, cat));
-    }
+ var sourceHtml;
+ if (cat === 'proc') {
+ sourceHtml = buildProcessTreeHtml(e);
+ } else {
+ sourceHtml = esc(evtSource(e, cat));
+ }
 
-    var searchText = [e.type, e.comm, e.args, e.user, details, size, e.dstIp, e.srcIp, e.message, RISK_LABELS[risk]];
-    if (e.processTree) searchText = searchText.concat(e.processTree);
-    var searchStr = searchText.join(' ').toLowerCase();
+ // Build risk factor badges
+ var factorsHtml = '';
+ for (var i = 0; i < riskFactors.length; i++) {
+ var f = riskFactors[i];
+ var fc = FACTOR_COLORS[f] || '#7a8fa0';
+ factorsHtml += '<span class="risk-factor-tag" style="background:' + fc + '22;color:' + fc + ';border:1px solid ' + fc + '44;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;display:inline-block">' + esc(f) + '</span>';
+ }
+ if (!factorsHtml) factorsHtml = '<span style="color:var(--text-muted)">—</span>';
 
-    var tr = document.createElement('tr');
-    tr.className = 'log-row log-row-clickable risk-' + risk;
-    tr.setAttribute('data-search', searchStr);
-    tr.setAttribute('data-risk', risk);
-    tr.innerHTML =
-      '<td class="log-time">' + time + '</td>' +
-      '<td><span class="risk-badge risk-' + risk + '">' + RISK_LABELS[risk] + '</span></td>' +
-      '<td><span class="badge ' + badgeClass(cat) + '">' + badgeLabel(cat) + '</span></td>' +
-      '<td class="log-detail">' + sourceHtml + '</td>' +
-      '<td class="log-detail">' + esc(details) + '</td>' +
-      '<td class="log-size">' + size + '</td>';
+ var searchText = [e.type, e.comm, e.args, e.user, details, size, e.dstIp, e.srcIp, e.message, CLASS_LABELS[classification]];
+ if (e.processTree) searchText = searchText.concat(e.processTree);
+ if (riskFactors.length) searchText = searchText.concat(riskFactors);
+ var searchStr = searchText.join(' ').toLowerCase();
 
-    var trEx = document.createElement('tr');
-    trEx.className = 'log-expand-row';
-    trEx.style.display = 'none';
-    trEx.innerHTML = '<td colspan="6"><div class="log-json">' + esc(JSON.stringify(e, null, 2)) + '</div></td>';
+ var tr = document.createElement('tr');
+ tr.className = 'log-row log-row-clickable class-' + classification;
+ tr.setAttribute('data-search', searchStr);
+ tr.setAttribute('data-classification', classification);
+ tr.style.borderLeft = '3px solid ' + (CLASS_COLORS[classification] || '#7a8fa0');
+ tr.innerHTML =
+ '<td class="log-time">' + time + '</td>' +
+ '<td><span class="risk-badge class-' + classification + '" style="background:' + (CLASS_COLORS[classification]||'#7a8fa0') + '22;color:' + (CLASS_COLORS[classification]||'#7a8fa0') + '">' + (CLASS_LABELS[classification]||classification) + '</span></td>' +
+ '<td><span class="badge ' + badgeClass(cat) + '">' + badgeLabel(cat) + '</span></td>' +
+ '<td class="log-detail">' + sourceHtml + '</td>' +
+ '<td class="log-detail">' + esc(details) + '</td>' +
+ '<td class="log-detail">' + factorsHtml + '</td>' +
+ '<td class="log-size">' + size + '</td>';
 
-    tr.addEventListener('click', function() {
-      var exp = tr.classList.toggle('expanded');
-      trEx.style.display = exp ? '' : 'none';
-    });
+ var trEx = document.createElement('tr');
+ trEx.className = 'log-expand-row';
+ trEx.style.display = 'none';
+ trEx.innerHTML = '<td colspan="7"><div class="log-json">' + esc(JSON.stringify(e, null, 2)) + '</div></td>';
 
-    elLogBody.appendChild(tr);
-    elLogBody.appendChild(trEx);
+ tr.addEventListener('click', function() {
+ var exp = tr.classList.toggle('expanded');
+ trEx.style.display = exp ? '' : 'none';
+ });
 
-    var matchText = !state.filterText || searchStr.indexOf(state.filterText) !== -1;
-    var matchRisk = state.riskFilterVal === 'all' || risk === state.riskFilterVal;
-    if (!(matchText && matchRisk)) { tr.style.display = 'none'; trEx.style.display = 'none'; }
+ elLogBody.appendChild(tr);
+ elLogBody.appendChild(trEx);
 
-    while (elLogBody.children.length > MAX_LOG_ROWS * 2) {
-      elLogBody.removeChild(elLogBody.firstChild);
-      elLogBody.removeChild(elLogBody.firstChild);
-    }
-    if (!state.userScrolled) elLogWrap.scrollTop = elLogWrap.scrollHeight;
-  }
+ var matchText = !state.filterText || searchStr.indexOf(state.filterText) !== -1;
+ var matchClass = state.classFilterVal === 'all' || classification === state.classFilterVal;
+ if (!(matchText && matchClass)) { tr.style.display = 'none'; trEx.style.display = 'none'; }
+
+ while (elLogBody.children.length > MAX_LOG_ROWS * 2) {
+ elLogBody.removeChild(elLogBody.firstChild);
+ elLogBody.removeChild(elLogBody.firstChild);
+ }
+ if (!state.userScrolled) elLogWrap.scrollTop = elLogWrap.scrollHeight;
+ }
 
   // --- Process Event ---
-  function processEvent(e) {
-    state.total++;
-    var cat = getCat(e.type);
-    if (cat === 'net') state.net++;
-    else if (cat === 'proc') state.proc++;
+ function processEvent(e) {
+ state.total++;
+ var cat = getCat(e.type);
+ if (cat === 'net') state.net++;
+ else if (cat === 'proc') state.proc++;
 
-    var risk = assessRisk(e);
-    state.risk[risk]++;
+ var cls = e.classification || 'unknown';
+ if (state.classification[cls] !== undefined) state.classification[cls]++;
 
-    state.timeline[TIMELINE_BUCKETS - 1]++;
-    state.sparkTotal.push(state.total); if (state.sparkTotal.length > SPARK_HISTORY) state.sparkTotal.shift();
-    if (cat==='net') { state.sparkNet.push(state.net); if (state.sparkNet.length > SPARK_HISTORY) state.sparkNet.shift(); }
-    if (cat==='proc') { state.sparkProc.push(state.proc); if (state.sparkProc.length > SPARK_HISTORY) state.sparkProc.shift(); }
+ state.timeline[TIMELINE_BUCKETS - 1]++;
+ state.sparkTotal.push(state.total); if (state.sparkTotal.length > SPARK_HISTORY) state.sparkTotal.shift();
+ if (cat==='net') { state.sparkNet.push(state.net); if (state.sparkNet.length > SPARK_HISTORY) state.sparkNet.shift(); }
+ if (cat==='proc') { state.sparkProc.push(state.proc); if (state.sparkProc.length > SPARK_HISTORY) state.sparkProc.shift(); }
 
-    if (cat === 'net' && e.dstIp) state.dstIps[e.dstIp] = (state.dstIps[e.dstIp]||0) + 1;
-    if (cat === 'proc' && e.comm) { var k = e.comm + (e.args ? ' '+e.args : ''); state.procs[k] = (state.procs[k]||0) + 1; }
+ if (cat === 'net' && e.dstIp) state.dstIps[e.dstIp] = (state.dstIps[e.dstIp]||0) + 1;
+ if (cat === 'proc' && e.comm) { var k = e.comm + (e.args ? ' '+e.args : ''); state.procs[k] = (state.procs[k]||0) + 1; }
 
-    addLogRow(e, risk);
-    renderStats();
-    renderRiskDonut();
-  }
+ addLogRow(e);
+ renderStats();
+ renderRiskDonut();
+ }
 
   // --- SSE ---
   var reconnectDelay = 1000;
@@ -690,13 +674,16 @@
 
   // --- Stats API ---
   function fetchStats() {
-    fetch('/api/stats').then(function(r){return r.json();}).then(function(s){
-      state.total = s.totalEvents||0; state.net = s.networkCount||0;
-      state.proc = s.endpointProcessCount||0;
-      if (s.topDstIps) { state.dstIps={}; for(var i=0;i<s.topDstIps.length;i++) state.dstIps[s.topDstIps[i].ip]=s.topDstIps[i].count; }
-      if (s.topProcesses) { state.procs={}; for(var i=0;i<s.topProcesses.length;i++) state.procs[s.topProcesses[i].comm]=s.topProcesses[i].count; }
-      renderStats(); renderTopList();
-    }).catch(function(){});
+ fetch('/api/stats').then(function(r){return r.json();}).then(function(s){
+ state.total = s.totalEvents||0; state.net = s.networkCount||0;
+ state.proc = s.endpointProcessCount||0;
+ state.classification.known_safe = s.knownSafeCount||0;
+ state.classification.unknown = s.unknownCount||0;
+ state.classification.suspicious = s.suspiciousCount||0;
+ if (s.topDstIps) { state.dstIps={}; for(var i=0;i<s.topDstIps.length;i++) state.dstIps[s.topDstIps[i].ip]=s.topDstIps[i].count; }
+ if (s.topProcesses) { state.procs={}; for(var i=0;i<s.topProcesses.length;i++) state.procs[s.topProcesses[i].comm]=s.topProcesses[i].count; }
+ renderStats(); renderTopList(); renderRiskDonut();
+ }).catch(function(){});
   }
 
   // Timeline tick

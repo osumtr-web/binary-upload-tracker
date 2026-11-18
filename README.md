@@ -1,20 +1,20 @@
-# 🛡️ Binary Upload Tracker
+# Binary Upload Tracker
 
 **Real-time outbound upload monitoring for macOS & Linux.**
 
 A lightweight, zero-dependency security tool that correlates network traffic with endpoint process trees to detect and classify suspicious file uploads. Built for security analysts, SREs, and developers who need visibility into what's leaving their machines.
 
-## ✨ Features
+## Features
 
-- **🔍 Upload-Only Filtering** — Ignores downloads and benign traffic; flags only actual upload indicators (`curl -T`, `scp`, `rsync`, `wget --post-file`, etc.)
-- **🌳 Deep Process Ancestry** — Full PID/PPID chain reconstruction traces uploads back to the initiating shell or service (`bash → python → curl`)
-- **⚖️ Risk Engine** — Automatic classification into `known_safe`, `unknown`, and `suspicious` with explainable risk factors
-- **📊 Grafana-Style Dashboard** — Real-time web UI with event timeline, destination IP heatmap, process frequency charts, and risk donut
-- **🔗 Network + Endpoint Correlation** — Combines `tcpdump` packet capture with process polling for complete visibility
-- **🖥️ Cross-Platform POSIX** — Native support for macOS (darwin) and Linux with automatic interface detection
-- **📦 Zero Dependencies** — Single-runtime [Bun](https://bun.sh/) application, no npm packages required
+- **Upload-Only Filtering** — Ignores downloads and benign traffic; flags only actual upload indicators (`curl -T`, `scp`, `rsync`, `wget --post-file`, etc.)
+- **Deep Process Ancestry** — Full PID/PPID chain reconstruction traces uploads back to the initiating shell or service (`bash → python → curl`)
+- **Risk Engine** — Automatic classification into `known_safe`, `unknown`, and `suspicious` with explainable risk factors
+- **Grafana-Style Dashboard** — Real-time web UI with event timeline, destination IP heatmap, process frequency charts, and risk donut
+- **Network + Endpoint Correlation** — Combines `tcpdump` packet capture with process polling for complete visibility
+- **Cross-Platform POSIX** — Native support for macOS (darwin) and Linux with automatic interface detection
+- **Zero Dependencies** — Single-runtime [Bun](https://bun.sh/) application, no npm packages required
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 graph LR
@@ -34,9 +34,9 @@ graph LR
     end
 
     subgraph "Classification Output"
-        RE --> KS["🟢 Known Safe"]
-        RE --> UN["🟡 Unknown"]
-        RE --> SU["🔴 Suspicious"]
+        RE --> KS["[Known Safe]"]
+        RE --> UN["[Unknown]"]
+        RE --> SU["[Suspicious]"]
     end
 ```
 
@@ -60,17 +60,17 @@ graph LR
 | Interpreters | `upload`/`exfil` keywords, script filenames | Normal execution |
 | `scp`/`sftp`/`rsync`/`ftp` | **Always flagged** | — |
 
-## ⚖️ Risk Engine & Segmentation
+## Risk Engine & Segmentation
 
 The Risk Engine is the core intelligence layer. Every captured event is evaluated against multiple heuristics and assigned one of three classifications:
 
 ### Classification Levels
 
-| Classification | Emoji | Description | Typical Score |
+| Classification | Indicator | Description | Typical Score |
 |---------------|-------|-------------|---------------|
-| `known_safe` | 🟢 | Standard system binaries communicating over local networks or well-known ports | 0–15 |
-| `unknown` | 🟡 | User-space scripts, interpreters, or public internet destinations that don't match known-safe or suspicious patterns | 30–60 |
-| `suspicious` | 🔴 | Execution from temp directories, non-standard ports, obfuscated commands, or large payloads to public IPs | 70–100 |
+| `known_safe` | [Known Safe] | Standard system binaries communicating over local networks or well-known ports | 0–15 |
+| `unknown` | [Unknown] | User-space scripts, interpreters, or public internet destinations that don't match known-safe or suspicious patterns | 30–60 |
+| `suspicious` | [Suspicious] | Execution from temp directories, non-standard ports, obfuscated commands, or large payloads to public IPs | 70–100 |
 
 ### Risk Factors
 
@@ -97,7 +97,7 @@ Each classified event includes an array of **Risk Factor** tags that explain *wh
 
 - **Suspicious** — Multiple risk signals converge: execution from temporary directories, obfuscated command arguments, non-standard ports to public IPs, or unusually large payloads. These represent potential data exfiltration or C2 communication and should be triaged immediately.
 
-## 🚀 Installation & Usage
+## Installation & Usage
 
 ### Prerequisites
 
@@ -128,7 +128,7 @@ sudo bash run.sh --interface eth0
 | `MIN_BYTES` | `64` | Minimum payload size (bytes) to trigger a network event |
 | `BUT_INTERFACE` | auto-detect | Override default network interface |
 
-## 🧪 Testing
+## Testing
 
 ```bash
 bun test
@@ -136,7 +136,7 @@ bun test
 
 Tests cover upload indicator matching, file path extraction, and tcpdump line parsing across edge cases including case insensitivity, dedicated transfer tools, interpreter keywords, and stdin redirects.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 run.sh          → Entry point (ensures root, launches server)

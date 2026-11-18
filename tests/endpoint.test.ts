@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkUploadIndicators } from "../endpoint";
-
+import { checkUploadIndicators, extractUploadFilePath } from "../endpoint";
 describe("checkUploadIndicators", () => {
 	describe("noise is ignored", () => {
 		test("curl GET request is not flagged", () => {
@@ -132,5 +131,47 @@ describe("checkUploadIndicators", () => {
 			expect(result.matched).toBe(true);
 			expect(result.pattern).toBe("curl -T");
 		});
+	});
+});
+
+describe("extractUploadFilePath", () => {
+	test("curl -T extracts file path", () => {
+		const result = extractUploadFilePath("curl", "curl -T /path/to/file.txt https://example.com");
+		expect(result).toBe("/path/to/file.txt");
+	});
+
+	test("curl --upload-file extracts file path", () => {
+		const result = extractUploadFilePath("curl", "curl --upload-file /data/upload.bin https://api.example.com");
+		expect(result).toBe("/data/upload.bin");
+	});
+
+	test("scp extracts local source path", () => {
+		const result = extractUploadFilePath("scp", "scp /local/file.txt user@host:/remote");
+		expect(result).toBe("/local/file.txt");
+	});
+
+	test("rsync extracts source path", () => {
+		const result = extractUploadFilePath("rsync", "rsync /src/ /dest/");
+		expect(result).toBe("/src/");
+	});
+
+	test("rsync with options extracts source path", () => {
+		const result = extractUploadFilePath("rsync", "rsync -avz --exclude=.git /src/ user@host:/backup/");
+		expect(result).toBe("/src/");
+	});
+
+	test("returns null for wget (no extraction supported)", () => {
+		const result = extractUploadFilePath("wget", "wget --post-file=/tmp/data.txt https://example.com");
+		expect(result).toBeNull();
+	});
+
+	test("returns null for unknown command", () => {
+		const result = extractUploadFilePath("ftp", "ftp put file.txt");
+		expect(result).toBeNull();
+	});
+
+	test("curl without -T returns null", () => {
+		const result = extractUploadFilePath("curl", "curl -X GET https://example.com");
+		expect(result).toBeNull();
 	});
 });

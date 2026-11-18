@@ -67,7 +67,7 @@ export function checkUploadIndicators(comm: string, args: string): UploadMatch {
 
 	return { matched: false, pattern: "" };
 }
-function extractUploadFilePath(comm: string, args: string): string | null {
+export function extractUploadFilePath(comm: string, args: string): string | null {
 	const commLower = comm.toLowerCase();
 	const parts = args.split(/\s+/);
 

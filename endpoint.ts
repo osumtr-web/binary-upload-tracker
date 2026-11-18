@@ -1,5 +1,5 @@
 import { statSync } from "fs";
-import { resolve } from "path";
+import { resolve as pathResolve } from "path";
 
 // Endpoint monitor: process poller only (upload focus)
 // Detects file upload processes and builds ancestry trees
@@ -247,11 +247,11 @@ function startProcessPoller(
 					seenPids.add(info.pid);
 					const processTree = buildAncestry(info.pid, procMap);
 
-					console.log("[endpoint] Upload detected:", { pid: info.pid, user: info.user, comm: info.comm, pattern: matchedPattern, tree: processTree });
+ const rawPath = extractUploadFilePath(info.comm, info.args);
+ const filePath = rawPath ? pathResolve(rawPath) : null;
+ const fileSizeBytes = filePath ? getFileSizeBytes(filePath) : null;
 
-					const rawPath = extractUploadFilePath(info.comm, info.args);
-					const filePath = rawPath ? resolve(rawPath) : null;
-					const fileSizeBytes = filePath ? getFileSizeBytes(filePath) : null;
+ console.log("[endpoint] Upload detected:", { pid: info.pid, user: info.user, comm: info.comm, pattern: matchedPattern, tree: processTree, filePath, fileSizeBytes });
 
 					onEvent({
 						type: "endpoint_process",
